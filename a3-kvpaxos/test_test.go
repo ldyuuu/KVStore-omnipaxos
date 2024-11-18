@@ -177,7 +177,7 @@ func TestBasicOneClient3A(t *testing.T) {
 
 	title := "Test: "
 
-	title = title + " Basic Test One Client"
+	title = title + "Basic Test One Client"
 
 	const nservers = 3
 	const nclients = 1
@@ -192,33 +192,31 @@ func TestBasicOneClient3A(t *testing.T) {
 	for i := 0; i < nclients; i++ {
 		clnts[i] = make(chan int)
 	}
-	
+
 	// Put(cfg, myck, key, last)
 	// Append(cfg, myck, key, nv)
 	// v := Get(cfg, myck, key)
 
 	for i := 0; i < 3; i++ {
-		log.Printf("Iteration %v\n", i)
+		// log.Printf("Iteration %v\n", i)
 		go spawn_clients_and_wait(t, cfg, nclients, func(cli int, myck *Clerk, t *testing.T) {
 			j := 0
 			defer func() {
 				clnts[cli] <- j
 			}()
-			log.Printf("here1 \n")
 			last := ""
 			key := strconv.Itoa(cli)
-			log.Printf("---------%d: client new put %v %v\n", cli, key,last)
 			Put(cfg, myck, key, last)
-			log.Printf("here1 \n")
+
 			for i := 0; i < 50; i++ {
 				if (rand.Int() % 1000) < 500 {
 					nv := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
-					log.Printf("---------%d: client new append %v\n", cli, nv)
+					// log.Printf("%d: client new append %v\n", cli, nv)
 					Append(cfg, myck, key, nv)
 					last = NextValue(last, nv)
 					j++
 				} else {
-					log.Printf("--------%d: client new get %v\n", cli, key)
+					// log.Printf("%d: client new get %v\n", cli, key)
 					v := Get(cfg, myck, key)
 					if v != last {
 						log.Fatalf("get wrong value, key %v, wanted:\n%v\n, got\n%v\n", key, last, v)
@@ -253,7 +251,7 @@ func TestBasicManyClients3A(t *testing.T) {
 
 	title := "Test: "
 
-	title = title + " Basic Test Many Client"
+	title = title + "Basic Test Many Client"
 
 	const nservers = 3
 	const nclients = nservers
@@ -327,7 +325,7 @@ func TestUnreliableNetwork3A(t *testing.T) {
 
 	title := "Test: "
 
-	title = title + " Unreliable Test Network"
+	title = title + "Unreliable Test Network"
 
 	const nservers = 3
 	const nclients = 1
@@ -357,10 +355,11 @@ func TestUnreliableNetwork3A(t *testing.T) {
 			}()
 			last := ""
 			key := strconv.Itoa(cli)
+			log.Printf("---------------------%d: client new put \n", cli)
 			Put(cfg, myck, key, last)
 
 			nv := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
-			// log.Printf("%d: client new append %v\n", cli, nv)
+			log.Printf("---------------------%d: client new append %v\n", cli, nv)
 			Append(cfg, myck, key, nv)
 			last = NextValue(last, nv)
 			j++
@@ -384,7 +383,7 @@ func TestUnreliableNetwork3A(t *testing.T) {
 func TestFig5APartitioningOne3A(t *testing.T) {
 	title := "Test: "
 
-	title = title + " Basic Fig 5A One Client"
+	title = title + "Fig 5A Partitioning One Client"
 
 	const nservers = 5
 	const nclients = 1
@@ -464,17 +463,15 @@ func TestFig5APartitioningOne3A(t *testing.T) {
 		log.Fatalf("No leader found!")
 	}
 
-	// define S
 	S := rand.Int() % nservers
+
+	// Loop runs until S is not the leader
 	for ; S == leader1; S = rand.Int() % nservers {
 	}
 
-	// connect S to everyone (but leader1)
 	var serversToConnectTo []int
 	for i := 0; i < nservers; i++ {
-		// if i != leader1 {
 		serversToConnectTo = append(serversToConnectTo, i)
-		// }
 	}
 	cfg.connect(S, serversToConnectTo)
 
@@ -594,7 +591,7 @@ func TestFig5APartitioningOne3A(t *testing.T) {
 func TestFig5APartitioningMany3A(t *testing.T) {
 	title := "Test: "
 
-	title = title + " Basic Fig 5A Many Client"
+	title = title + "Fig 5A Partitioning Many Clients"
 
 	const nservers = 5
 	const nclients = 3
@@ -663,7 +660,9 @@ func TestFig5APartitioningMany3A(t *testing.T) {
 
 		}
 	}
-	// basicFunc()
+
+	// sleep to reach some stability
+	time.Sleep(PaxosElectionTimeout)
 
 	// Partitioning
 
@@ -680,15 +679,14 @@ func TestFig5APartitioningMany3A(t *testing.T) {
 
 	// define S
 	S := rand.Int() % nservers
+
+	// Loop runs until S is not the leader
 	for ; S == leader1; S = rand.Int() % nservers {
 	}
 
-	// connect S to everyone (but leader1)
 	var serversToConnectTo []int
 	for i := 0; i < nservers; i++ {
-		// if i != leader1 {
 		serversToConnectTo = append(serversToConnectTo, i)
-		// }
 	}
 	cfg.connect(S, serversToConnectTo)
 
@@ -717,7 +715,7 @@ func TestFig5APartitioningMany3A(t *testing.T) {
 func TestFig5BPartitioningOne3A(t *testing.T) {
 	title := "Test: "
 
-	title = title + " Basic Fig 5B One Client"
+	title = title + "Fig 5B Partitioning One Client"
 
 	const nservers = 5
 	const nclients = 1
@@ -790,7 +788,6 @@ func TestFig5BPartitioningOne3A(t *testing.T) {
 	basicFunc()
 
 	// Partitioning
-
 	for i := 0; i < nservers; i++ {
 		// disconnect everyone
 		cfg.disconnect(i, cfg.All())
@@ -932,7 +929,7 @@ func TestFig5BPartitioningOne3A(t *testing.T) {
 func TestFig5BPartitioningMany3A(t *testing.T) {
 	title := "Test: "
 
-	title = title + " Basic Fig 5B Many Client"
+	title = title + "Fig 5B Partitioning Many Clients"
 
 	const nservers = 5
 	const nclients = 3
@@ -1001,10 +998,11 @@ func TestFig5BPartitioningMany3A(t *testing.T) {
 
 		}
 	}
-	// basicFunc()
+
+	// sleep to reach some stability
+	time.Sleep(PaxosElectionTimeout)
 
 	// Partitioning
-
 	for i := 0; i < nservers; i++ {
 		// disconnect everyone
 		cfg.disconnect(i, cfg.All())
@@ -1055,7 +1053,7 @@ func TestFig5BPartitioningMany3A(t *testing.T) {
 func TestFig5CPartitioningOne3A(t *testing.T) {
 	title := "Test: "
 
-	title = title + " Basic Fig 5C One Client"
+	title = title + "Fig 5C Partitioning One Client"
 
 	const nservers = 3
 	const nclients = 1
@@ -1128,7 +1126,6 @@ func TestFig5CPartitioningOne3A(t *testing.T) {
 	basicFunc()
 
 	// Partitioning
-
 	ok, leader1 := cfg.Leader()
 
 	if !ok {
@@ -1258,7 +1255,7 @@ func TestFig5CPartitioningOne3A(t *testing.T) {
 func TestFig5CPartitioningMany3A(t *testing.T) {
 	title := "Test: "
 
-	title = title + " Basic Fig 5C Many Client"
+	title = title + "Fig 5C Partitioning Many Clients"
 
 	const nservers = 3
 	const nclients = 3
@@ -1327,10 +1324,11 @@ func TestFig5CPartitioningMany3A(t *testing.T) {
 
 		}
 	}
-	// basicFunc()
+
+	// sleep to reach some stability
+	time.Sleep(PaxosElectionTimeout)
 
 	// Partitioning
-
 	ok, leader1 := cfg.Leader()
 
 	if !ok {
@@ -1369,7 +1367,7 @@ func TestFig5CPartitioningMany3A(t *testing.T) {
 func TestPersistOne3A(t *testing.T) {
 	title := "Test: "
 
-	title = title + " Basic Persist One Client"
+	title = title + "Persist One Client"
 
 	const nservers = 5
 	const nclients = 1
@@ -1467,7 +1465,7 @@ func TestPersistOne3A(t *testing.T) {
 func TestPersistMany3A(t *testing.T) {
 	title := "Test: "
 
-	title = title + " Basic Persist Many Client"
+	title = title + "Persist Many Clients"
 
 	const nservers = 5
 	const nclients = 3
@@ -1540,7 +1538,6 @@ func TestPersistMany3A(t *testing.T) {
 	basicFunc()
 
 	// Crashing
-
 	// log.Printf("shutdown servers\n")
 	for i := 0; i < nservers/2; i++ {
 		cfg.ShutdownServer(i)

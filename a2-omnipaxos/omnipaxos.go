@@ -140,7 +140,7 @@ func (op *OmniPaxos) sendHeartBeats(server int, args *HBRequest, reply *HBReply)
 func (op *OmniPaxos) HeartBeatHandler(args *HBRequest, reply *HBReply) {
 	op.mu.Lock()
 	defer op.mu.Unlock()
-	fmt.Printf("%d gets %d's ballot: %d with qc= %b\n",args.S,op.me,op.b.BallotNum,op.b.Qc)
+	//fmt.Printf("%d gets %d's ballot: %d with qc= %v\n",args.S,op.me,op.b.BallotNum,op.b.Qc)
 	reply.Rnd = args.Rnd
 	reply.Ballot = op.b
 	reply.Q = op.qc
@@ -300,7 +300,7 @@ func (op *OmniPaxos) checkLeader() {
 				S:  maxBallot.Pid,
 				N: maxBallot,
 			}
-			fmt.Printf("%d'sleader's ballot is %d, maxis %d,leader is %d,op.dec is %d\n",op.me,op.l.BallotNum,maxBallot.BallotNum,op.leader,op.decidedIdx)
+			//fmt.Printf("%d'sleader's ballot is %d, maxis %d,leader is %d,op.dec is %d\n",op.me,op.l.BallotNum,maxBallot.BallotNum,op.leader,op.decidedIdx)
 			op.persist()
 			if (op.me==op.leader){
 				op.Leader(leaderArgs,false)
@@ -390,7 +390,7 @@ func (b Ballot) IsGreaterThan(other Ballot) bool {
 
 func (op *OmniPaxos) Leader(args *Leader,trigger bool) {
 	
-	// fmt.Print("im leader\n")
+	fmt.Printf("%d start leader im leader\n",op.me)
 	// for i, ballot := range op.ballots {
     //     fmt.Printf("Ballot %d - Pid: %d, Qc: %v, Rnd: %d\n", i+1, ballot.Pid, ballot.Qc, ballot.BallotNum)
     // }
@@ -480,8 +480,8 @@ func (op *OmniPaxos) PrepareHandler(args *Prepare, reply *DummyReply) {
 		DecIdx:  op.decidedIdx,
 		Sfx:      sfx,
 	}
-	// fmt.Printf("Promise - N: %v, AccRnd: %v, LogIdx: %d, F: %d, DecIdx: %d, Sfx: %v\n",
-    // args1.N, args1.AccRnd, args1.LogIdx, args1.F, args1.DecIdx, args1.Sfx)
+	 fmt.Printf("Promise - N: %v, AccRnd: %v, LogIdx: %d, F: %d, DecIdx: %d, Sfx: %v\n",
+    args1.N, args1.AccRnd, args1.LogIdx, args1.F, args1.DecIdx, args1.Sfx)
 
 	go func(leader int, promiseArgs *Promise) {
         var promiseReply DummyReply
@@ -536,25 +536,39 @@ func (op *OmniPaxos) PromiseHandler(args *Promise, reply *DummyReply) {
         if op.maxProm.AccRnd != op.acceptedRnd {
 			if (op.decidedIdx>0){
             	op.log = op.log[:op.decidedIdx] 
+				fmt.Printf("%d prefix %v\n",op.me,op.log)
 			}
         }
-		
+		fmt.Printf("%d sufix %v\n",op.me, op.maxProm.Sfx)
         // Step P4: Append maxProm.Sfx to the log
         op.log = append(op.log, op.maxProm.Sfx...)
-
+		fmt.Printf("log:%v\n",op.log)
+		fmt.Printf("%v\n",op.promises)
         // Step P5: If the server was stopped, clear the buffer and add buffer to the log
         if op.stopped() {
             op.buffer = []interface{}{} // Clear the buffer
         } else {
             op.log = append(op.log, op.buffer[:]...) // Append buffer to the log
+			op.buffer = []interface{}{} 
         }
-		fmt.Println(op.log)
+		//fmt.Println(op.log)
         // Step P6: Update acceptedRnd and state to LEADER_ACCEPT
         op.acceptedRnd = op.currentRnd
         op.accepted[op.me] = len(op.log)
         op.state = "LEADER_ACCEPT"
 		op.persist()
-
+		// for idx := op.decidedIdx+1 ; idx <=len( op.log) ; idx++ {
+		// 	if ((idx-1 < len(op.log))&&(idx-1>=0)) {
+		// 		msg := ApplyMsg{
+		// 			CommandValid: true,
+		// 			Command:      op.log[idx-1], 
+		// 			CommandIndex: idx-1,
+		// 		}
+		// 		op.applyCh <- msg 
+		// 	}
+		// }
+		// op.decidedIdx = len( op.log)
+		// op.persist()
         // Step P9: Send AcceptSync messages to all peers based on the promises
         for _, p := range op.promises {
             var syncIdx int
@@ -579,18 +593,7 @@ func (op *OmniPaxos) PromiseHandler(args *Promise, reply *DummyReply) {
 				}
 			}(p.F, acceptArgs) 
         }
-		for idx := op.decidedIdx+1 ; idx <=len( op.log) ; idx++ {
-			if ((idx-1 < len(op.log))&&(idx-1>=0)) {
-				msg := ApplyMsg{
-					CommandValid: true,
-					Command:      op.log[idx-1], 
-					CommandIndex: idx-1,
-				}
-				op.applyCh <- msg 
-			}
-		}
-		op.decidedIdx = len( op.log)-1
-		op.persist()
+		
 	}
     case "LEADER_ACCEPT":
         // Handle the state when in the LEADER_ACCEPT phase
@@ -660,7 +663,7 @@ func (op *OmniPaxos) AcceptSyncHandler(args *AcceptSync, reply *DummyReply) {
     // Step 2: 
     op.acceptedRnd = args.N
     op.state = "FOLLOWER_ACCEPT"
-	// fmt.Printf("op.log:%d\n",len(op.log))
+	fmt.Printf(" %d ⟨AcceptSync⟩ was calld\n",op.me)
 
     // Step 3: Update the log
 	if (args.SyncIdx>=0&&args.SyncIdx<=len(op.log)){
@@ -668,7 +671,7 @@ func (op *OmniPaxos) AcceptSyncHandler(args *AcceptSync, reply *DummyReply) {
 	}
     // Append sfx to the log
     op.log = append(op.log, args.Sfx...)
-	//fmt.Printf("%d's Log updated(syn): %+v\n", op.me,op.log)
+	fmt.Printf("%d's Log updated(syn): %v\n", op.me,op.log)
 	op.persist()
 
     // Step 4: Send an Accepted message back to the leader with the log length
@@ -700,7 +703,7 @@ func (op *OmniPaxos) Proposal(command interface{}) (int, int, bool) {
 
 	isLeader = (op.leader == op.me)
 	if !isLeader {
-		//fmt.Printf("imhere1")
+		//fmt.Printf("imhere1,%dnot leader\n",op.me)
 		return op.me, op.b.BallotNum, false
 	}
 	//fmt.Printf("state:%v\n",op.state)
@@ -722,7 +725,7 @@ func (op *OmniPaxos) Proposal(command interface{}) (int, int, bool) {
 				N: op.currentRnd,
 				C: command,
 			}
-			fmt.Printf("%d's log: %+v\n", op.me,op.log)
+			//fmt.Printf("%d's log: %+v\n", op.me,op.log)
 
 			var acceptCount int32 = 1 
 			for _, promise := range op.promises {
@@ -730,6 +733,7 @@ func (op *OmniPaxos) Proposal(command interface{}) (int, int, bool) {
 					var acceptReply DummyReply
 					ok := op.peers[peer].Call("OmniPaxos.AcceptHandler", acceptArgs, &acceptReply)
 					if ok {
+						fmt.Printf("%d get it\n",promise.F)
 						atomic.AddInt32(&acceptCount, 1)
 					}
 				}(promise.F) 
@@ -744,6 +748,7 @@ func (op *OmniPaxos) Proposal(command interface{}) (int, int, bool) {
 			}
 			
 			op.persist()
+
 			if atomic.LoadInt32(&acceptCount) > int32(len(op.peers)/2) {
 				
 				for idx := op.decidedIdx+1; idx < len(op.log)+1; idx++ {
@@ -756,11 +761,13 @@ func (op *OmniPaxos) Proposal(command interface{}) (int, int, bool) {
 						}
 						fmt.Printf("applied%v\n",msg)
 						op.applyCh <- msg
-						
+						//fmt.Printf("applied%v\n",msg)
 					}
 				}
 				op.decidedIdx = len(op.log)
+				//fmt.Printf("%d is gonna return\n",op.me)
 				op.persist()
+				
 				decideArgs := &Decide{
 					N:      op.currentRnd,
 					DecIdx: op.decidedIdx,
@@ -775,9 +782,11 @@ func (op *OmniPaxos) Proposal(command interface{}) (int, int, bool) {
 				}
 			}else{ 
 				fmt.Printf("not enough")
-			}
 
 			
+			}
+
+			//fmt.Printf("%d is gonna return\n",op.me)
 			return len(op.log) - 1, op.b.BallotNum, true
 		}
 
@@ -792,7 +801,7 @@ func (op *OmniPaxos) Proposal(command interface{}) (int, int, bool) {
 func (op *OmniPaxos) AcceptedHandler(args *Accepted, reply *DummyReply) {
     op.mu.Lock()
     defer op.mu.Unlock()
-
+	fmt.Printf("Accepted was called with arg: %+v\n", args)
     if op.currentRnd != args.N || op.state != "LEADER_ACCEPT" {
         return
     }
@@ -800,7 +809,7 @@ func (op *OmniPaxos) AcceptedHandler(args *Accepted, reply *DummyReply) {
     op.accepted[args.F] = args.LogIdx
 
     majority := len(op.peers)/2 + 1
-    count := 0
+    count := 1
     for _, acceptedIdx := range op.accepted {
         if acceptedIdx >= args.LogIdx {
             count++
@@ -808,21 +817,24 @@ func (op *OmniPaxos) AcceptedHandler(args *Accepted, reply *DummyReply) {
     }
 
     if count >= majority && args.LogIdx > op.decidedIdx {
-		for idx := op.decidedIdx+1; idx < len(op.log)+1; idx++ {
+		for idx := op.decidedIdx+1; idx <  args.LogIdx+1; idx++ {
 			if (idx-1 < len(op.log)) && (idx-1 >= 0) {
 				msg := ApplyMsg{
 					CommandValid: true,
 					Command:      op.log[idx-1],
 					CommandIndex: idx - 1,
 				}
+				fmt.Printf("%d :Committed log entry: %+v\n",op.me, op.log[idx-1])
 				op.applyCh <- msg
 				
 				//fmt.Printf("Committed log entry: %+v\n", op.log)
 			}
 		}
-        op.decidedIdx = args.LogIdx
-        for i := 0; i < len(op.peers); i++ {
-            if i != op.me {
+        op.decidedIdx =  args.LogIdx
+		op.persist()
+		for _, i := range op.promises {
+        
+            if i.F != op.me {
                 decideArgs := &Decide{
                     N:        op.currentRnd,
                     DecIdx: op.decidedIdx,
@@ -833,9 +845,10 @@ func (op *OmniPaxos) AcceptedHandler(args *Accepted, reply *DummyReply) {
                     if !ok {
                     
                     }
-                }(i)
+                }(i.F)
             }
-        }
+		}
+        
     }
 }
 
@@ -852,11 +865,11 @@ func (op *OmniPaxos) DecideHandler(args *Decide, reply *DummyReply) {
 					CommandIndex: idx-1,
 				}
 				op.applyCh <- msg 
-				
+				//fmt.Printf("%d decide %v\n",op.me,msg)
 			}
 		}
 		op.decidedIdx=args.DecIdx
-		 fmt.Printf("%d decide %d\n",op.me,op.decidedIdx)
+		 //fmt.Printf("%d decide %d\n",op.me,op.decidedIdx)
 		// fmt.Printf("accrnd:%d op:%d\n",op.acceptedRnd.BallotNum,op.me)
 		op.persist()
 	}
@@ -867,7 +880,7 @@ func (op *OmniPaxos) AcceptHandler(args *Accept, reply *Accepted) {
     defer op.mu.Unlock()
 	
 	if (op.promisedRnd!=args.N||op.state!="FOLLOWER_ACCEPT") {
-		//fmt.Printf("%d's op.promisedRnd: %v,but args.N%v\n", op.me,op.promisedRnd,args.N)
+		fmt.Printf("%d's op.promisedRnd: %v,but args.N%v\n", op.me,op.promisedRnd,args.N)
 		return
 	}
 	

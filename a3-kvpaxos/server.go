@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
-
+	"time" // 引入time包
 	omnipaxos "cs651/a2-omnipaxos"
 	"cs651/labgob"
 	"cs651/labrpc"
@@ -21,95 +21,98 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 }
 
 type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
-	Name string
-	Key string
-	Value string
-	ClientID int64
+	Name      string
+	Key       string
+	Value     string
+	ClientID  int64
 	RequestID int64
 }
 
 type KVServer struct {
-	mu      sync.Mutex
-	me      int
-	rf      *omnipaxos.OmniPaxos
-	applyCh chan omnipaxos.ApplyMsg
-	dead    int32 // set by Kill()
+	mu           sync.Mutex
+	me           int
+	rf           *omnipaxos.OmniPaxos
+	applyCh      chan omnipaxos.ApplyMsg
+	dead         int32 // set by Kill()
 
 	enableLogging int32
-	store   map[string]string
-	// Your definitions here.
-}
-func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-    
-    op := Op{
-        Name:      args.Op,
-        Key:       args.Key,
-        Value:     args.Value,
-        ClientID:  args.ClientID,
-        RequestID: args.RequestID,
-    }
-
-    // 向 Raft 提交 Proposal
-    _, _, ok := kv.rf.Proposal(op)
-    if !ok {
-        reply.Err = ErrWrongLeader
-        return
-    }
-	fmt.Printf("%d is here waiting!!!!!!!!!!!!!\n",kv.me)
-    // 等待 applyCh 中的响应
-    for msg := range kv.applyCh {
-
-        fmt.Printf("Received from applyCh: %v at index %d\n", msg.Command, msg.CommandIndex)
-
-        if appliedOp, ok := msg.Command.(Op); ok && appliedOp.ClientID == op.ClientID && appliedOp.RequestID == op.RequestID {
-            kv.mu.Lock()
-            if args.Op == "Put" {
-                kv.store[args.Key] = args.Value
-            } else if args.Op == "Append" {
-                kv.store[args.Key] += args.Value
-            }
-            kv.mu.Unlock()
-            reply.Err = OK
-			fmt.Printf("%dstopped\n",kv.me)
-            return
-        }
-    }
+	store         map[string]string
+	lastRequest   map[int64]int64       
+	lastResponse  map[int64]interface{} 
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-    op := Op{
-        Name:      "Get",
-        Key:       args.Key,
-        Value:     "",
-        ClientID:  args.ClientID,
-        RequestID: args.RequestID,
-    }
+	op := Op{
+		Name:      "Get",
+		Key:       args.Key,
+		Value:     "",
+		ClientID:  args.ClientID,
+		RequestID: args.RequestID,
+	}
+    
+	_, _, ok := kv.rf.Proposal(op)
+	if !ok {
+		reply.Err = ErrWrongLeader
+		return
+	}
 
-    // 提交 Get 请求
-    _, _, ok := kv.rf.Proposal(op)
-    if !ok {
-        reply.Err = ErrWrongLeader
-        return
-    }
-	fmt.Printf("%d is here waiting!!!!!!!!!!!!!\n",kv.me)
-    // 等待 applyCh 中的响应
-    for msg := range kv.applyCh {
-        fmt.Printf("Received from applyCh: %v at index %d\n", msg.Command, msg.CommandIndex)
-
-        if appliedOp, ok := msg.Command.(Op); ok && appliedOp.ClientID == op.ClientID && appliedOp.RequestID == op.RequestID {
-			fmt.Printf("Received from applyCh: %v at index %d\n", msg.Command, msg.CommandIndex)
-            kv.mu.Lock()
-            reply.Value = kv.store[args.Key]
-            kv.mu.Unlock()
-            reply.Err = OK
-            return
-        }
-    }
+	timeout := time.After(500 * time.Millisecond)
+	for {
+		select {
+		case <-timeout:
+			return
+		default:
+			kv.mu.Lock()
+			if lastReqID := kv.lastRequest[args.ClientID]; lastReqID >= args.RequestID {
+				reply.Value = kv.store[args.Key]
+                fmt.Printf("%d just get %v\n",kv.me,reply.Value)
+				reply.Err = OK
+				kv.mu.Unlock()
+				return
+			}
+			kv.mu.Unlock()
+		}
+	}
 }
 
+func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
+	op := Op{
+		Name:      args.Op,
+		Key:       args.Key,
+		Value:     args.Value,
+		ClientID:  args.ClientID,
+		RequestID: args.RequestID,
+	}
+
+	kv.mu.Lock()
+	if lastReqID := kv.lastRequest[args.ClientID]; lastReqID >= args.RequestID {
+		reply.Err = OK
+		kv.mu.Unlock()
+		return
+	}
+	kv.mu.Unlock()
+
+	_, _, ok := kv.rf.Proposal(op)
+	if !ok {
+		reply.Err = ErrWrongLeader
+		return
+	}
+	timeout := time.After(500 * time.Millisecond)
+	for {
+		select {
+		case <-timeout:
+			return
+		default:
+			kv.mu.Lock()
+			if lastReqID := kv.lastRequest[args.ClientID]; lastReqID >= args.RequestID {
+				reply.Err = OK
+				kv.mu.Unlock()
+				return
+			}
+			kv.mu.Unlock()
+		}
+	}
+}
 // the tester calls Kill() when a KVServer instance won't
 // be needed again. for your convenience, we supply
 // code to set rf.dead (without needing a lock),
@@ -128,7 +131,26 @@ func (kv *KVServer) killed() bool {
 	z := atomic.LoadInt32(&kv.dead)
 	return z == 1
 }
+func (kv *KVServer) listenApplyCh() {
+	for msg := range kv.applyCh {
+		if op, ok := msg.Command.(Op); ok {
+			kv.mu.Lock()
+			if lastReqID:= kv.lastRequest[op.ClientID]; lastReqID >= op.RequestID {
+				kv.mu.Unlock()
+				continue
+			}
+			if op.Name == "Put" {
+				kv.store[op.Key] = op.Value
+			} else if op.Name == "Append" {
+				kv.store[op.Key] += op.Value
+			}
+            fmt.Printf("%d just %v with %v %v\n",kv.me,op.Name,op.ClientID,op.RequestID)
+			kv.lastRequest[op.ClientID] = op.RequestID
 
+			kv.mu.Unlock()
+		}
+	}
+}
 // servers[] contains the ports of the set of
 // servers that will cooperate via OmniPaxos to
 // form the fault-tolerant key/value service.
@@ -154,10 +176,12 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *omnipaxos.Per
 
 	// You may need initialization code here.
 	kv.store = make(map[string]string)
-	kv.applyCh = make(chan omnipaxos.ApplyMsg)
+	kv.applyCh = make(chan omnipaxos.ApplyMsg,50000)
 	kv.rf = omnipaxos.Make(servers, me, persister, kv.applyCh)
-
+   
+    kv.lastRequest=make(map[int64]int64)
+    kv.lastResponse = make(map[int64]interface{})
 	// You may need initialization code here.
-
+    go kv.listenApplyCh()
 	return kv
 }

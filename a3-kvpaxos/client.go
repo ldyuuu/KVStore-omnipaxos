@@ -4,16 +4,14 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
-	//"time"
+	"time" 
 	"cs651/labrpc"
 )
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	// You will have to modify this struct.
 	ClerkID   int64
 	RequestID int64
-	
 	lastLeader int
 }
 
@@ -27,27 +25,13 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-
-	ck.ClerkID = nrand()       // 随机生成 ClerkID
-	ck.RequestID = 1           // 初始化 RequestID
-	ck.lastLeader = 0          // 从第一个服务器开始
-	return ck
-	// You'll have to add code here.
+	ck.ClerkID = nrand()
+	ck.RequestID = 1
+	ck.lastLeader = 0
 	return ck
 }
 
-// fetch the current value for a key.
-// returns "" if the key does not exist.
-// keeps trying forever in the face of all other errors.
-//
-// you can send an RPC with code like this:
-// ok := ck.servers[i].Call("KVServer.Get", &args, &reply)
-//
-// the types of args and reply (including whether they are pointers)
-// must match the declared types of the RPC handler function's
-// arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
-	//time.Sleep(100*time.Millisecond)
 	args := GetArgs{
 		Key:      key,
 		ClientID: ck.ClerkID,
@@ -59,27 +43,31 @@ func (ck *Clerk) Get(key string) string {
 		for i := 0; i < len(ck.servers); i++ {
 			server := (ck.lastLeader + i) % len(ck.servers)
 			var reply GetReply
-			ok := ck.servers[server].Call("KVServer.Get", &args, &reply)
-			if ok && reply.Err == OK {
-				ck.lastLeader = server // 更新上次成功访问的服务器
-				return reply.Value
+
+			done := make(chan bool, 1)
+			go func() {
+				ok := ck.servers[server].Call("KVServer.Get", &args, &reply)
+				if ok && reply.Err == OK {
+					done <- true
+				} else {
+					done <- false
+				}
+			}()
+
+			select {
+			case success := <-done:
+				if success {
+					ck.lastLeader = server
+					return reply.Value
+				}
+			case <-time.After(500 * time.Millisecond): 
+				fmt.Printf("Get request timed out for server %d, retrying...\n", server)
 			}
 		}
 	}
-	// You will have to modify this function.
-	return ""
 }
 
-// shared by Put and Append.
-//
-// you can send an RPC with code like this:
-// ok := ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
-//
-// the types of args and reply (including whether they are pointers)
-// must match the declared types of the RPC handler function's
-// arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	//time.Sleep(100*time.Millisecond)
 	args := PutAppendArgs{
 		Key:       key,
 		Value:     value,
@@ -88,21 +76,38 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		RequestID: ck.RequestID,
 	}
 	ck.RequestID++
-	fmt.Printf("%v\n",args)
+	//fmt.Printf("client print:%v\n", args)
+
 	for {
 		for i := 0; i < len(ck.servers); i++ {
 			server := (ck.lastLeader + i) % len(ck.servers)
 			var reply PutAppendReply
-			//fmt.Printf("sever %d\n",i)
-			ok := ck.servers[server].Call("KVServer.PutAppend", &args, &reply)
-			if ok && reply.Err == OK {
-				ck.lastLeader = server // 更新上次成功访问的服务器
-				return
+
+			done := make(chan bool, 1)
+			go func() {
+				ok := ck.servers[server].Call("KVServer.PutAppend", &args, &reply)
+				if ok  {
+					done <- true
+				} else {
+					done <- false
+				}
+			}()
+
+			select {
+			case success := <-done:
+				if success &&reply.Err==OK{
+					ck.lastLeader = server
+					return
+				}else if success &&reply.Err== ErrWrongLeader{
+					break
+				}
+			case <-time.After(500 * time.Millisecond): 
+				fmt.Printf("PutAppend request timed out for server %d, retrying...\n", server)
 			}
 		}
 	}
-	// You will have to modify this function.
 }
+
 
 func (ck *Clerk) Put(key string, value string) {
 	ck.PutAppend(key, value, "Put")
